@@ -1,0 +1,179 @@
+---
+title: "Malaria Risk Mapping in Malaysia (Demo)"
+author: "Alfa Pradana"
+toc: true
+number-sections: true
+syntax-highlighting: pygments
+format:
+  html: 
+    html-math-method: katex
+editor: source
+---
+
+## Load spatial data
+
+```{r setup}
+#| echo: false
+#| output: false
+# In report.qmd or a new script — run interactively first
+source("R/risk_index.R")
+
+library(terra)
+library(sf)
+library(geodata)
+library(tidyterra)
+library(ggplot2)
+library(patchwork)
+```
+
+### Admin boundaries
+
+```{r load boundaries}
+mys <- gadm("MYS", level = 1, path = "data/raw/")
+
+# Climate layers (annual mean temp °C, annual precip mm)
+tmean <- worldclim_country("MYS", var = "tavg", path = "data/raw/")
+prec  <- worldclim_country("MYS", var = "prec",  path = "data/raw/")
+```
+
+### Annual mean temperature (mean of 12 monthly layers)
+
+```{r compute ann}
+tmean_ann <- mean(tmean)
+prec_ann  <- sum(prec) / 12   # average monthly precipitation
+```
+
+```{r plot mean ann}
+plot(tmean_ann, main = "Annual Mean Temperature (°C)")
+```
+
+```{r plot prec ann}
+plot(prec_ann, main = "Average Monthly Precipitation (mm)")
+```
+
+
+
+## Apply risk functions
+
+```{r load func}
+temp_suit <- temp_suitability(tmean_ann)
+rain_suit <- rain_suitability(prec_ann)
+```
+
+### Crop to Malaysia boundary
+
+```{r crop to mys}
+temp_suit <- mask(crop(temp_suit, mys), mys)
+rain_suit <- mask(crop(rain_suit, mys), mys)
+```
+
+```{r plot temp suit}
+plot(temp_suit, main = "Temperature Suitability")
+```
+
+```{r plot rain suit}
+plot(rain_suit, main = "Rainfall Suitability")
+```
+
+### Compute composite risk index
+
+```{r compute risk index}
+risk <- compute_risk_index(temp_suit, rain_suit)
+```
+
+```{r plot map risk}
+plot(risk, main = "Composite Malaria Risk Index")
+```
+
+
+## Load and join case data
+
+```{r}
+#| echo: false
+# IF using real data:
+# cases <- read.csv("data/raw/malaria_cases.csv")
+
+# IF using simulated fallback (paste the fallback block from pre-session)
+```
+
+### Generate dummy data
+
+```{r generate data}
+set.seed(42)
+malaria_sim <- data.frame(
+  NAME_1   = c("Sabah","Sarawak","Kelantan","Pahang","Perak",
+               "Terengganu","Kedah","Johor","Negeri Sembilan",
+               "Melaka","Selangor","Pulau Pinang","Perlis",
+               "Putrajaya","Kuala Lumpur","Labuan"),
+  cases    = c(4820,2310,890,670,540,430,310,280,190,
+               120,95,60,40,15,10,8),
+  population = c(3900000,2800000,1900000,1700000,2500000,
+                 1200000,2200000,3800000,1100000,
+                 930000,6500000,1800000,250000,
+                 100000,1800000,100000)
+) |> dplyr::mutate(
+  incidence = (cases / population) * 1000,
+  risk_cat  = cut(incidence, breaks = c(0,0.1,0.5,1,5,Inf),
+                  labels = c("Very Low","Low","Moderate","High","Very High"))
+)
+
+# Convert to sf for joining
+mys_sf <- sf::st_as_sf(mys)
+mys_sf <- dplyr::left_join(mys_sf, malaria_sim, by = "NAME_1")
+```
+
+
+## Visualise
+
+### Climate risk map
+
+```{r map 1}
+p1 <- ggplot() +
+  geom_spatraster(data = risk) +
+  geom_sf(data = mys_sf, fill = NA, colour = "white", linewidth = 0.3) +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1,
+                       name = "Climate\nRisk Index",
+                       na.value = "transparent") +
+  labs(title = "Climate Suitability for Malaria Transmission",
+       subtitle = "Temperature + Rainfall composite index",
+       caption = "WorldClim v2.1 | Mordecai et al. 2013") +
+  theme_void(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+p1
+```
+
+### Reported case incidence choropleth
+
+```{r map 2}
+p2 <- ggplot(mys_sf) +
+  geom_sf(aes(fill = incidence), colour = "white", linewidth = 0.3) +
+  scale_fill_distiller(palette = "Reds", direction = 1,
+                       name = "Incidence\n(per 1,000)",
+                       na.value = "grey90") +
+  labs(title = "Reported Malaria Incidence",
+       subtitle = "Cases per 1,000 population",
+       caption = "Source: WHO / MoH Malaysia") +
+  theme_void(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+p2
+```
+
+Plot side-by-side
+
+```{r visualisation}
+#| column: page
+#| fig-width: 14
+#| fig-height: 6
+p1 + p2
+```
+
+Save image for sharing
+
+```{r ggsave}
+#| eval: false
+
+ggsave("outputs/maps/malaria_risk_malaysia.png", 
+       width = 14, 
+       height = 6, 
+       dpi = 200)
+```
