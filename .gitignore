@@ -1,0 +1,12 @@
+.Rproj.user
+data/raw/
+*.tif
+*.shp
+*.dbf
+*.prj
+*.shx
+.Rhistory
+.RData
+.httr-oauth
+.DS_Store
+.quarto
